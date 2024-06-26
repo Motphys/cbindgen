@@ -214,12 +214,16 @@ fn run_compile_test(
     cbindgen_outputs: &mut HashSet<Vec<u8>>,
     package_version: bool,
 ) {
-    let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_|{
+    let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| {
         // When debugging in VSCode, the CARGO_MANIFEST_DIR is not set, fallback to current directory.
         // See https://github.com/rust-lang/rust-analyzer/issues/13022
-        std::env::current_dir().unwrap().to_str().unwrap().to_owned()
+        std::env::current_dir()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
     });
-           
+
     let tests_path = Path::new(&crate_dir).join("tests");
     let mut generated_file = tests_path.join("expectations");
     fs::create_dir_all(&generated_file).unwrap();
@@ -343,46 +347,52 @@ fn test_file(name: &'static str, filename: &'static str) {
     let tmp_dir = tmp_dir.path();
     // Run tests in deduplication priority order. C++ compatibility tests are run first,
     // otherwise we would lose the C++ compiler run if they were deduplicated.
-    let mut cbindgen_outputs = HashSet::new();
-    for cpp_compat in &[true, false] {
-        for style in &[Style::Type, Style::Tag, Style::Both] {
+    if env::var_os("CBINDGEN_TEST_SKIP_C").is_none() {
+        let mut cbindgen_outputs = HashSet::new();
+        for cpp_compat in &[true, false] {
+            for style in &[Style::Type, Style::Tag, Style::Both] {
+                run_compile_test(
+                    name,
+                    test,
+                    tmp_dir,
+                    Language::C,
+                    *cpp_compat,
+                    Some(*style),
+                    &mut cbindgen_outputs,
+                    false,
+                );
+            }
+        }
+    }
+
+    if env::var_os("CBINDGEN_TEST_SKIP_CXX").is_none() {
+        run_compile_test(
+            name,
+            test,
+            tmp_dir,
+            Language::Cxx,
+            /* cpp_compat = */ false,
+            None,
+            &mut HashSet::new(),
+            false,
+        );
+    }
+
+    if env::var_os("CBINDGEN_TEST_SKIP_CYTHON").is_none() {
+        // `Style::Both` should be identical to `Style::Tag` for Cython.
+        let mut cbindgen_outputs = HashSet::new();
+        for style in &[Style::Type, Style::Tag] {
             run_compile_test(
                 name,
                 test,
                 tmp_dir,
-                Language::C,
-                *cpp_compat,
+                Language::Cython,
+                /* cpp_compat = */ false,
                 Some(*style),
                 &mut cbindgen_outputs,
                 false,
             );
         }
-    }
-
-    run_compile_test(
-        name,
-        test,
-        tmp_dir,
-        Language::Cxx,
-        /* cpp_compat = */ false,
-        None,
-        &mut HashSet::new(),
-        false,
-    );
-
-    // `Style::Both` should be identical to `Style::Tag` for Cython.
-    let mut cbindgen_outputs = HashSet::new();
-    for style in &[Style::Type, Style::Tag] {
-        run_compile_test(
-            name,
-            test,
-            tmp_dir,
-            Language::Cython,
-            /* cpp_compat = */ false,
-            Some(*style),
-            &mut cbindgen_outputs,
-            false,
-        );
     }
 }
 
