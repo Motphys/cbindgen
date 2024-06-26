@@ -721,6 +721,22 @@ impl Constant {
                 write!(out, " {} # = ", name);
                 language_backend.write_literal(out, value);
             }
+            Language::CSharp => {
+                // if java_writable_literal(&self.ty, value) {
+                //     out.write("public static final ");
+                //     language_backend.write_type(out, &self.ty);
+                //     write!(out, " {}  = ", self.export_name);
+                //     language_backend.write_literal(out, &wrap_java_value(value, &self.ty));
+                //     out.write(";")
+                // } else {
+                //     write!(
+                //         out,
+                //         "/* Unsupported literal for constant {} */",
+                //         self.export_name
+                //     )
+                // }
+                out.new_line();
+            }
         }
 
         condition.write_after(config, out);

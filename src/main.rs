@@ -165,7 +165,7 @@ fn main() {
                 .long("lang")
                 .value_name("LANGUAGE")
                 .help("Specify the language to output bindings in")
-                .value_parser(["c++", "C++", "c", "C", "cython", "Cython"]),
+                .value_parser(["c++", "C++", "c", "C", "cython", "Cython", "csharp", "Csharp", "CSharp","CSHARP", "c#", "C#"]),
         )
         .arg(
             Arg::new("package-version")

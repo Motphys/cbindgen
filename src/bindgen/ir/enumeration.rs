@@ -14,7 +14,7 @@ use crate::bindgen::ir::{
     GenericArgument, GenericParams, GenericPath, Item, ItemContainer, Literal, Path, Repr,
     ReprStyle, Struct, ToCondition, Type,
 };
-use crate::bindgen::language_backend::LanguageBackend;
+use crate::bindgen::language_backend::{self, LanguageBackend};
 use crate::bindgen::library::Library;
 use crate::bindgen::mangle;
 use crate::bindgen::monomorph::Monomorphs;
@@ -729,6 +729,9 @@ impl Enum {
                     write!(out, "{}enum {}", config.style.cython_def(), tag_name);
                 }
             }
+            Language::CSharp => {
+                unimplemented!("not implemented yet");
+            }
         }
         out.open_brace();
 
@@ -783,6 +786,9 @@ impl Enum {
             Language::C if config.style.generate_typedef() => out.write("typedef "),
             Language::C | Language::Cxx => {}
             Language::Cython => out.write(config.style.cython_def()),
+            Language::CSharp => {
+                unimplemented!("not implemented yet");
+            }
         }
 
         out.write(if inline_tag_field { "union" } else { "struct" });

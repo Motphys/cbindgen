@@ -9,9 +9,11 @@ use crate::Config;
 use std::io::Write;
 
 mod clike;
+mod csharp;
 mod cython;
 
 pub use clike::CLikeLanguageBackend;
+pub use csharp::CSharpLanguageBackend;
 pub use cython::CythonLanguageBackend;
 
 pub trait LanguageBackend: Sized {

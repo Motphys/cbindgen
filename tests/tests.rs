@@ -59,6 +59,9 @@ fn run_cbindgen(
         Language::Cython => {
             command.arg("--lang").arg("cython");
         }
+        Language::CSharp => {
+            command.arg("--lang").arg("csharp");
+        }
     }
 
     if package_version {
@@ -123,6 +126,7 @@ fn compile(
         Language::Cxx => env::var("CXX").unwrap_or_else(|_| "g++".to_owned()),
         Language::C => env::var("CC").unwrap_or_else(|_| "gcc".to_owned()),
         Language::Cython => env::var("CYTHON").unwrap_or_else(|_| "cython".to_owned()),
+        Language::CSharp => env::var("CSC").unwrap_or_else(|_| "csc".to_owned()),
     };
 
     let file_name = cbindgen_output
@@ -185,6 +189,7 @@ fn compile(
             command.arg("-o").arg(&object);
             command.arg(cbindgen_output);
         }
+        Language::CSharp => {}
     }
 
     println!("Running: {:?}", command);
@@ -230,6 +235,7 @@ fn run_compile_test(
         // is extension-sensitive and won't work on them, so we use implementation files (`.pyx`)
         // in the test suite.
         Language::Cython => ".pyx",
+        Language::CSharp => ".cs",
     };
 
     let skip_warning_as_error = name.rfind(SKIP_WARNING_AS_ERROR_SUFFIX).is_some();
