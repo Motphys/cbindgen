@@ -1,3 +1,5 @@
+// Skip depfile tests on Windows, as the pathes in the depfile are not normalized.
+#![cfg(not(windows))]
 use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::process::Command;
