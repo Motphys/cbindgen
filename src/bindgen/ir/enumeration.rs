@@ -730,7 +730,29 @@ impl Enum {
                 }
             }
             Language::CSharp => {
-                unimplemented!("not implemented yet");
+                if config.enumeration.enum_class(&self.annotations) {
+                    out.write("enum class");
+                } else {
+                    out.write("enum");
+                }
+
+                if self.annotations.must_use(config) {
+                    if let Some(ref anno) = config.enumeration.must_use {
+                        write!(out, " {}", anno)
+                    }
+                }
+
+                if let Some(note) = self
+                    .annotations
+                    .deprecated_note(config, DeprecatedNoteKind::Enum)
+                {
+                    write!(out, " {}", note);
+                }
+
+                write!(out, " {}", tag_name);
+                if let Some(prim) = size {
+                    write!(out, " : {}", prim);
+                }
             }
         }
         out.open_brace();
@@ -784,11 +806,8 @@ impl Enum {
     ) {
         match config.language {
             Language::C if config.style.generate_typedef() => out.write("typedef "),
-            Language::C | Language::Cxx => {}
+            Language::C | Language::Cxx | Language::CSharp => {}
             Language::Cython => out.write(config.style.cython_def()),
-            Language::CSharp => {
-                unimplemented!("not implemented yet");
-            }
         }
 
         out.write(if inline_tag_field { "union" } else { "struct" });

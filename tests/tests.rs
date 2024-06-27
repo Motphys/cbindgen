@@ -394,6 +394,19 @@ fn test_file(name: &'static str, filename: &'static str) {
             );
         }
     }
+
+    if env::var_os("CBINDGEN_TEST_SKIP_CSHARP").is_none() {
+        run_compile_test(
+            name,
+            test,
+            tmp_dir,
+            Language::CSharp,
+            /* cpp_compat = */ false,
+            None,
+            &mut HashSet::new(),
+            false,
+        );
+    }
 }
 
 macro_rules! test_file {

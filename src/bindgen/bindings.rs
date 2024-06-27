@@ -215,7 +215,7 @@ impl Bindings {
             }
             Language::CSharp => self.write_with_backend(
                 file,
-                &mut CSharpLanguageBackend::new(&self.config, self.binding_crate_lib_name.clone()),
+                &mut CSharpLanguageBackend::new(&self.config),
             ),
         }
     }
