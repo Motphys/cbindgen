@@ -29,3 +29,19 @@ internal unsafe partial struct TupleNamed {
   public int x;
   public float y;
 }
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe partial struct WithBool {
+  public int x;
+  public float y;
+  [MarshalAs(UnmanagedType.U1)]
+  public bool z;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe partial struct TupleWithBool {
+  public int _0;
+  public float _1;
+  [MarshalAs(UnmanagedType.U1)]
+  public bool _2;
+}

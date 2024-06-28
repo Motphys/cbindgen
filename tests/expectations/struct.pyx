@@ -25,4 +25,20 @@ cdef extern from *:
     int32_t x;
     float y;
 
-  void root(Opaque *a, Normal b, NormalWithZST c, TupleRenamed d, TupleNamed e);
+  ctypedef struct WithBool:
+    int32_t x;
+    float y;
+    bool z;
+
+  ctypedef struct TupleWithBool:
+    int32_t _0;
+    float _1;
+    bool _2;
+
+  void root(Opaque *a,
+            Normal b,
+            NormalWithZST c,
+            TupleRenamed d,
+            TupleNamed e,
+            WithBool f,
+            TupleWithBool g);

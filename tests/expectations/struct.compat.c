@@ -25,11 +25,29 @@ typedef struct {
   float y;
 } TupleNamed;
 
+typedef struct {
+  int32_t x;
+  float y;
+  bool z;
+} WithBool;
+
+typedef struct {
+  int32_t _0;
+  float _1;
+  bool _2;
+} TupleWithBool;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
 
-void root(Opaque *a, Normal b, NormalWithZST c, TupleRenamed d, TupleNamed e);
+void root(Opaque *a,
+          Normal b,
+          NormalWithZST c,
+          TupleRenamed d,
+          TupleNamed e,
+          WithBool f,
+          TupleWithBool g);
 
 #ifdef __cplusplus
 }  // extern "C"

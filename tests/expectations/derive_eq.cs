@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe partial struct Foo {
+  [MarshalAs(UnmanagedType.U1)]
   public bool a;
   public int b;
 
