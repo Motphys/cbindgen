@@ -213,10 +213,9 @@ impl Bindings {
             Language::Cython => {
                 self.write_with_backend(file, &mut CythonLanguageBackend::new(&self.config))
             }
-            Language::CSharp => self.write_with_backend(
-                file,
-                &mut CSharpLanguageBackend::new(&self.config),
-            ),
+            Language::CSharp => {
+                self.write_with_backend(file, &mut CSharpLanguageBackend::new(&self.config))
+            }
         }
     }
 

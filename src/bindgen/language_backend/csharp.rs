@@ -1,12 +1,12 @@
 use crate::bindgen::ir::{
     to_known_assoc_constant, ConditionWrite, DeprecatedNoteKind, Documentation, Enum, EnumVariant,
-    Field, GenericParams, Item, Literal, OpaqueItem, ReprAlign, Static, Struct, ToCondition, Type,
+    Field, GenericParams, Item, Literal, OpaqueItem, Static, Struct, ToCondition, Type,
     Typedef, Union,
 };
 use crate::bindgen::language_backend::LanguageBackend;
 use crate::bindgen::rename::IdentifierType;
 use crate::bindgen::writer::{ListType, SourceWriter};
-use crate::bindgen::{cdecl, Bindings, Config, Language};
+use crate::bindgen::{Bindings, Config, Language};
 use crate::bindgen::{DocumentationLength, DocumentationStyle};
 use std::io::Write;
 
@@ -42,16 +42,25 @@ impl<'a> CSharpLanguageBackend<'a> {
         condition.write_after(self.config, out);
     }
 
+    fn write_union_field<W: Write>(&mut self, out: &mut SourceWriter<W>, f: &Field) {
+        out.write("[FieldOffset(0)]");
+        out.new_line();
+        self.write_field(out, f);
+    }
+
     fn write_field<W: Write>(&mut self, out: &mut SourceWriter<W>, f: &Field) {
         let condition = f.cfg.to_condition(self.config);
         condition.write_before(self.config, out);
 
         self.write_documentation(out, &f.documentation);
-        cdecl::write_field(self, out, &f.ty, &f.name, self.config);
+        out.write("public ");
+        self.write_type(out, &f.ty);
 
         if let Some(bitfield) = f.annotations.atom("bitfield") {
             write!(out, ": {}", bitfield.unwrap_or_default());
         }
+
+        write!(out, " {}", f.name);
 
         condition.write_after(self.config, out);
         // FIXME(#634): `write_vertical_source_list` should support
@@ -67,53 +76,29 @@ impl<'a> CSharpLanguageBackend<'a> {
     }
 
     fn open_close_namespaces<W: Write>(&mut self, out: &mut SourceWriter<W>, open: bool) {
-        let mut namespaces =
-            if self.config.language != Language::CSharp && !self.config.cpp_compatible_c() {
-                vec![]
-            } else {
-                let mut ret = vec![];
-                if let Some(ref namespace) = self.config.namespace {
+        let namespaces = {
+            let mut ret = vec![];
+            if let Some(ref namespace) = self.config.namespace {
+                ret.push(&**namespace);
+            }
+            if let Some(ref namespaces) = self.config.namespaces {
+                for namespace in namespaces {
                     ret.push(&**namespace);
                 }
-                if let Some(ref namespaces) = self.config.namespaces {
-                    for namespace in namespaces {
-                        ret.push(&**namespace);
-                    }
-                }
-                ret
-            };
+            }
+            ret
+        };
 
         if namespaces.is_empty() {
             return;
         }
 
-        if !open {
-            namespaces.reverse();
+        if open {
+            write!(out, "namespace {}", namespaces.join("."));
+            out.open_brace();
+        } else {
+            out.close_brace(false);
         }
-
-        if self.config.cpp_compatible_c() {
-            out.new_line_if_not_start();
-            out.write("#ifdef __cplusplus");
-        }
-
-        for namespace in namespaces {
-            out.new_line();
-            if open {
-                write!(out, "namespace {} {{", namespace)
-            } else {
-                write!(out, "}}  // namespace {}", namespace)
-            }
-        }
-
-        out.new_line();
-        if self.config.cpp_compatible_c() {
-            out.write("#endif  // __cplusplus");
-            out.new_line();
-        }
-    }
-
-    fn generate_typedef(&self) -> bool {
-        self.config.language == Language::C && self.config.style.generate_typedef()
     }
 
     fn write_derived_cpp_ops<W: Write>(&mut self, out: &mut SourceWriter<W>, s: &Struct) {
@@ -349,18 +334,6 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
             write!(out, "{}", f);
             out.new_line();
         }
-        if let Some(f) = self.config.include_guard() {
-            out.new_line_if_not_start();
-            write!(out, "#ifndef {}", f);
-            out.new_line();
-            write!(out, "#define {}", f);
-            out.new_line();
-        }
-        if self.config.pragma_once {
-            out.new_line_if_not_start();
-            write!(out, "#pragma once");
-            out.new_line();
-        }
         if self.config.include_version {
             out.new_line_if_not_start();
             write!(
@@ -376,66 +349,16 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
             out.new_line();
         }
 
-        if self.config.no_includes
-            && self.config.sys_includes().is_empty()
-            && self.config.includes().is_empty()
-            && self.config.after_includes.is_none()
-        {
+        if self.config.no_includes && self.config.after_includes.is_none() {
             return;
         }
 
         out.new_line_if_not_start();
 
         if !self.config.no_includes {
-            match self.config.language {
-                Language::C => {
-                    out.write("#include <stdarg.h>");
-                    out.new_line();
-                    out.write("#include <stdbool.h>");
-                    out.new_line();
-                    if self.config.usize_is_size_t {
-                        out.write("#include <stddef.h>");
-                        out.new_line();
-                    }
-                    out.write("#include <stdint.h>");
-                    out.new_line();
-                    out.write("#include <stdlib.h>");
-                    out.new_line();
-                }
-                Language::CSharp => {
-                    out.write("#include <cstdarg>");
-                    out.new_line();
-                    if self.config.usize_is_size_t {
-                        out.write("#include <cstddef>");
-                        out.new_line();
-                    }
-                    out.write("#include <cstdint>");
-                    out.new_line();
-                    out.write("#include <cstdlib>");
-                    out.new_line();
-                    out.write("#include <ostream>");
-                    out.new_line();
-                    out.write("#include <new>");
-                    out.new_line();
-                    if self.config.enumeration.cast_assert_name.is_none()
-                        && (self.config.enumeration.derive_mut_casts
-                            || self.config.enumeration.derive_const_casts)
-                    {
-                        out.write("#include <cassert>");
-                        out.new_line();
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        for include in self.config.sys_includes() {
-            write!(out, "#include <{}>", include);
+            out.write("using System.Runtime.CompilerServices;");
             out.new_line();
-        }
-
-        for include in self.config.includes() {
-            write!(out, "#include \"{}\"", include);
+            out.write("using System.Runtime.InteropServices;");
             out.new_line();
         }
 
@@ -453,20 +376,46 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
         self.open_close_namespaces(out, false)
     }
 
-    fn write_footers<W: Write>(&mut self, out: &mut SourceWriter<W>) {
-        if let Some(f) = self.config.include_guard() {
-            out.new_line_if_not_start();
-            if self.config.language == Language::C {
-                write!(out, "#endif  /* {} */", f);
-            } else {
-                write!(out, "#endif  // {}", f);
-            }
-            out.new_line();
-        }
-    }
+    fn write_footers<W: Write>(&mut self, out: &mut SourceWriter<W>) {}
 
     fn write_enum<W: Write>(&mut self, out: &mut SourceWriter<W>, e: &Enum) {
-        let size = e.repr.ty.map(|ty| ty.to_primitive().to_repr_c(self.config));
+        let mut size = e
+            .repr
+            .ty
+            .map(|ty| ty.to_primitive().to_repr_csharp(self.config));
+        if let Some(real_size) = size {
+            if real_size != "byte"
+                && real_size != "sbyte"
+                && real_size != "short"
+                && real_size != "ushort"
+                && real_size != "int"
+                && real_size != "uint"
+                && real_size != "long"
+                && real_size != "ulong"
+            {
+                out.write(
+                    "// WARNING: Type byte, sbyte, short, ushort, int, uint, long, or ulong expected,",
+                );
+                out.new_line();
+                out.write("// but found ");
+                out.write(real_size);
+                out.write(" instead.");
+                out.new_line();
+                out.write("// This is a limitation of C# enums, which only support those types.");
+                out.new_line();
+                out.write("// Please consider using a different type for this enum.");
+                out.new_line();
+                out.write("// See https://learn.microsoft.com/en-us/dotnet/csharp/misc/cs1008 for more information.");
+                out.new_line();
+                out.write(
+                    "// The size of the enum will be set to int to avoid compilation errors.",
+                );
+                out.new_line();
+                out.write("// It could be different from it's size in rust, use with caution.");
+                out.new_line();
+                size = None;
+            }
+        }
         let has_data = e.tag.is_some();
         let inline_tag_field = Enum::inline_tag_field(&e.repr);
         let tag_name = e.tag_name();
@@ -478,10 +427,26 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
         self.write_generic_param(out, &e.generic_params);
 
         // If the enum has data, we need to emit a struct or union for the data
-        // and enum for the tag. C++ supports nested type definitions, so we open
+        // and enum for the tag. C# supports nested type definitions, so we open
         // the struct or union here and define the tag enum inside it (*).
-        if has_data && self.config.language == Language::CSharp {
-            e.open_struct_or_union(self.config, out, inline_tag_field);
+        if has_data {
+            if inline_tag_field {
+                out.write("[StructLayout(LayoutKind.Explicit)]");
+            } else {
+                out.write("[StructLayout(LayoutKind.Sequential)]");
+            }
+            out.new_line();
+            out.write("internal unsafe partial struct");
+
+            write!(out, " {}", e.export_name);
+
+            out.open_brace();
+
+            // Emit the pre_body section, if relevant
+            if let Some(body) = self.config.export.pre_body(&e.path) {
+                out.write_raw_block(body);
+                out.new_line();
+            }
         }
 
         // Emit the tag enum and everything related to it.
@@ -493,20 +458,16 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
             out.new_line();
             out.new_line();
 
-            // Open the struct or union for the data (**), gathering all the variants with data
-            // together, unless it's C++, then we have already opened that struct/union at (*) and
-            // are currently inside it.
-            if self.config.language != Language::CSharp {
-                e.open_struct_or_union(self.config, out, inline_tag_field);
-            }
-
             // Emit tag field that is separate from all variants.
             e.write_tag_field(self.config, out, size, inline_tag_field, tag_name);
+            out.new_line();
             out.new_line();
 
             // Open union of all variants with data, only in the non-inline tag scenario.
             if !inline_tag_field {
-                out.write("union");
+                out.write("[StructLayout(LayoutKind.Explicit)]");
+                out.new_line();
+                out.write("public unsafe partial struct Variants");
                 out.open_brace();
             }
 
@@ -515,7 +476,10 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
 
             // Close union of all variants with data, only in the non-inline tag scenario.
             if !inline_tag_field {
-                out.close_brace(true);
+                out.close_brace(false);
+                out.new_line();
+                out.new_line();
+                out.write("public Variants variants;");
             }
 
             // Emit convenience methods for the struct or enum for the data.
@@ -528,12 +492,8 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
             }
 
             // Close the struct or union opened either at (*) or at (**).
-            if self.generate_typedef() {
-                out.close_brace(false);
-                write!(out, " {};", e.export_name);
-            } else {
-                out.close_brace(true);
-            }
+
+            out.close_brace(false);
         }
 
         condition.write_after(self.config, out);
@@ -567,33 +527,22 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
             self.write_generic_param(out, &s.generic_params);
         }
 
-        // The following results in
-        // C++ or C with Tag as style:
-        //   struct Name {
-        // C with Type only style:
-        //   typedef struct {
-        // C with Both as style:
-        //   typedef struct Name {
-        if self.generate_typedef() {
-            out.write("typedef ");
+        if let Some(_align) = s.alignment {
+            out.write("// WARNING: `packed` and `align(N)` is not implemented for C# yet.");
+            out.new_line();
+            out.write("// As a result, the size and alignment of this struct could be different from rust.");
+            out.new_line();
+            out.write("// Use with caution.");
         }
 
-        out.write("struct");
-
-        if let Some(align) = s.alignment {
-            match align {
-                ReprAlign::Packed => {
-                    if let Some(ref anno) = self.config.layout.packed {
-                        write!(out, " {}", anno);
-                    }
-                }
-                ReprAlign::Align(n) => {
-                    if let Some(ref anno) = self.config.layout.aligned_n {
-                        write!(out, " {}({})", anno, n);
-                    }
-                }
-            }
+        out.write("[StructLayout(LayoutKind.Sequential)]");
+        out.new_line();
+        if s.is_enum_variant_body {
+            out.write("public");
+        } else {
+            out.write("internal");
         }
+        out.write(" unsafe partial struct");
 
         if s.annotations.must_use(self.config) {
             if let Some(ref anno) = self.config.structure.must_use {
@@ -608,9 +557,7 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
             write!(out, " {}", note);
         }
 
-        if self.config.language != Language::C || self.config.style.generate_tag() {
-            write!(out, " {}", s.export_name());
-        }
+        write!(out, " {}", s.export_name());
 
         out.open_brace();
 
@@ -622,9 +569,7 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
 
         out.write_vertical_source_list(self, &s.fields, ListType::Cap(";"), Self::write_field);
 
-        if self.config.language == Language::CSharp {
-            self.write_derived_cpp_ops(out, s);
-        }
+        self.write_derived_cpp_ops(out, s);
 
         // Emit the post_body section, if relevant
         if let Some(body) = self.config.export.post_body(&s.path) {
@@ -642,12 +587,7 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
         //     }
         // }
 
-        if self.generate_typedef() {
-            out.close_brace(false);
-            write!(out, " {};", s.export_name());
-        } else {
-            out.close_brace(true);
-        }
+        out.close_brace(false);
 
         for constant in &s.associated_constants {
             out.new_line();
@@ -665,37 +605,19 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
 
         self.write_generic_param(out, &u.generic_params);
 
-        // The following results in
-        // C++ or C with Tag as style:
-        //   union Name {
-        // C with Type only style:
-        //   typedef union {
-        // C with Both as style:
-        //   typedef union Name {
-        if self.generate_typedef() {
-            out.write("typedef ");
-        }
-
-        out.write("union");
-
         if let Some(align) = u.alignment {
-            match align {
-                ReprAlign::Packed => {
-                    if let Some(ref anno) = self.config.layout.packed {
-                        write!(out, " {}", anno);
-                    }
-                }
-                ReprAlign::Align(n) => {
-                    if let Some(ref anno) = self.config.layout.aligned_n {
-                        write!(out, " {}({})", anno, n);
-                    }
-                }
-            }
+            out.write("// WARNING: `packed` and `align(N)` is not implemented for C# yet.");
+            out.new_line();
+            out.write("// As a result, the size and alignment of this struct could be different from rust.");
+            out.new_line();
+            out.write("// Use with caution.");
         }
 
-        if self.config.language != Language::C || self.config.style.generate_tag() {
-            write!(out, " {}", u.export_name);
-        }
+        out.write("[StructLayout(LayoutKind.Explicit)]");
+        out.new_line();
+        out.write("internal unsafe partial struct");
+
+        write!(out, " {}", u.export_name);
 
         out.open_brace();
 
@@ -705,7 +627,12 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
             out.new_line();
         }
 
-        out.write_vertical_source_list(self, &u.fields, ListType::Cap(";"), Self::write_field);
+        out.write_vertical_source_list(
+            self,
+            &u.fields,
+            ListType::Cap(";"),
+            Self::write_union_field,
+        );
 
         // Emit the post_body section, if relevant
         if let Some(body) = self.config.export.post_body(&u.path) {
@@ -713,12 +640,7 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
             out.write_raw_block(body);
         }
 
-        if self.generate_typedef() {
-            out.close_brace(false);
-            write!(out, " {};", u.export_name);
-        } else {
-            out.close_brace(true);
-        }
+        out.close_brace(false);
 
         condition.write_after(self.config, out);
     }
@@ -731,62 +653,78 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
 
         o.generic_params.write_with_default(self, self.config, out);
 
-        if self.generate_typedef() {
-            write!(
-                out,
-                "typedef struct {} {};",
-                o.export_name(),
-                o.export_name()
-            );
-        } else {
-            write!(out, "struct {};", o.export_name());
-        }
+        out.write(
+            "// WARNING: Opaque type, no details available, so only pointers to it are allowed",
+        );
+        out.new_line();
+        write!(out, "internal unsafe struct {}", o.export_name());
+        out.open_brace();
+
+        out.close_brace(false);
 
         condition.write_after(self.config, out);
     }
 
     fn write_type_def<W: Write>(&mut self, out: &mut SourceWriter<W>, t: &Typedef) {
-        let condition = t.cfg.to_condition(self.config);
-        condition.write_before(self.config, out);
+        // let condition = t.cfg.to_condition(self.config);
+        // condition.write_before(self.config, out);
 
-        self.write_documentation(out, &t.documentation);
+        // self.write_documentation(out, &t.documentation);
 
-        self.write_generic_param(out, &t.generic_params);
+        // self.write_generic_param(out, &t.generic_params);
 
-        if self.config.language == Language::CSharp {
-            write!(out, "using {} = ", t.export_name());
-            self.write_type(out, &t.aliased);
-        } else {
-            write!(out, "{} ", self.config.language.typedef());
-            self.write_field(
-                out,
-                &Field::from_name_and_type(t.export_name().to_owned(), t.aliased.clone()),
-            );
-        }
+        // if self.config.language == Language::CSharp {
+        //     write!(out, "using {} = ", t.export_name());
+        //     self.write_type(out, &t.aliased);
+        // } else {
+        //     write!(out, "{} ", self.config.language.typedef());
+        //     self.write_field(
+        //         out,
+        //         &Field::from_name_and_type(t.export_name().to_owned(), t.aliased.clone()),
+        //     );
+        // }
 
-        out.write(";");
+        // out.write(";");
 
-        condition.write_after(self.config, out);
+        // condition.write_after(self.config, out);
     }
 
     fn write_static<W: Write>(&mut self, out: &mut SourceWriter<W>, s: &Static) {
-        let condition = s.cfg.to_condition(self.config);
-        condition.write_before(self.config, out);
+        // let condition = s.cfg.to_condition(self.config);
+        // condition.write_before(self.config, out);
 
-        self.write_documentation(out, &s.documentation);
-        out.write("extern ");
-        if let Type::Ptr { is_const: true, .. } = s.ty {
-        } else if !s.mutable {
-            out.write("const ");
-        }
-        cdecl::write_field(self, out, &s.ty, &s.export_name, self.config);
-        out.write(";");
+        // self.write_documentation(out, &s.documentation);
+        // out.write("extern ");
+        // if let Type::Ptr { is_const: true, .. } = s.ty {
+        // } else if !s.mutable {
+        //     out.write("const ");
+        // }
+        // cdecl::write_field(self, out, &s.ty, &s.export_name, self.config);
+        // out.write(";");
 
-        condition.write_after(self.config, out);
+        // condition.write_after(self.config, out);
     }
 
     fn write_type<W: Write>(&mut self, out: &mut SourceWriter<W>, t: &Type) {
-        cdecl::write_type(self, out, t, self.config);
+        match t {
+            Type::Ptr { ty, .. } => {
+                self.write_type(out, &**ty);
+                out.write("*");
+            }
+
+            Type::Path(path) => {
+                write!(out, "{}", path.export_name())
+            }
+            Type::Primitive(primitive) => {
+                let typ = primitive.to_repr_csharp(self.config);
+                write!(out, "{typ}")
+            }
+            Type::Array(ty, _len) => {
+                self.write_type(out, ty);
+                out.write("[]");
+            }
+            Type::FuncPtr { .. } => out.write("Callback"),
+        }
     }
 
     fn write_documentation<W: Write>(&mut self, out: &mut SourceWriter<W>, d: &Documentation) {
@@ -943,60 +881,60 @@ impl LanguageBackend for CSharpLanguageBackend<'_> {
     }
 
     fn write_globals<W: Write>(&mut self, out: &mut SourceWriter<W>, b: &Bindings) {
-        // Override default method to open various blocs containing both globals and functions
-        // these blocks are closed in [`write_functions`] that is also overridden
-        if !b.functions.is_empty() || !b.globals.is_empty() {
-            if b.config.cpp_compatible_c() {
-                out.new_line_if_not_start();
-                out.write("#ifdef __cplusplus");
-            }
+        // // Override default method to open various blocs containing both globals and functions
+        // // these blocks are closed in [`write_functions`] that is also overridden
+        // if !b.functions.is_empty() || !b.globals.is_empty() {
+        //     if b.config.cpp_compatible_c() {
+        //         out.new_line_if_not_start();
+        //         out.write("#ifdef __cplusplus");
+        //     }
 
-            if b.config.language == Language::CSharp {
-                if let Some(ref using_namespaces) = b.config.using_namespaces {
-                    for namespace in using_namespaces {
-                        out.new_line();
-                        write!(out, "using namespace {};", namespace);
-                    }
-                    out.new_line();
-                }
-            }
+        //     if b.config.language == Language::CSharp {
+        //         if let Some(ref using_namespaces) = b.config.using_namespaces {
+        //             for namespace in using_namespaces {
+        //                 out.new_line();
+        //                 write!(out, "using namespace {};", namespace);
+        //             }
+        //             out.new_line();
+        //         }
+        //     }
 
-            if b.config.language == Language::CSharp || b.config.cpp_compatible_c() {
-                out.new_line();
-                out.write("extern \"C\" {");
-                out.new_line();
-            }
+        //     if b.config.language == Language::CSharp || b.config.cpp_compatible_c() {
+        //         out.new_line();
+        //         out.write("extern \"C\" {");
+        //         out.new_line();
+        //     }
 
-            if b.config.cpp_compatible_c() {
-                out.write("#endif // __cplusplus");
-                out.new_line();
-            }
+        //     if b.config.cpp_compatible_c() {
+        //         out.write("#endif // __cplusplus");
+        //         out.new_line();
+        //     }
 
-            self.write_globals_default(out, b);
-        }
+        //     self.write_globals_default(out, b);
+        // }
     }
 
     fn write_functions<W: Write>(&mut self, out: &mut SourceWriter<W>, b: &Bindings) {
-        // Override default method to close various blocks containing both globals and functions
-        // these blocks are opened in [`write_globals`] that is also overridden
-        if !b.functions.is_empty() || !b.globals.is_empty() {
-            self.write_functions_default(out, b);
+        // // Override default method to close various blocks containing both globals and functions
+        // // these blocks are opened in [`write_globals`] that is also overridden
+        // if !b.functions.is_empty() || !b.globals.is_empty() {
+        //     self.write_functions_default(out, b);
 
-            if b.config.cpp_compatible_c() {
-                out.new_line();
-                out.write("#ifdef __cplusplus");
-            }
+        //     if b.config.cpp_compatible_c() {
+        //         out.new_line();
+        //         out.write("#ifdef __cplusplus");
+        //     }
 
-            if b.config.language == Language::CSharp || b.config.cpp_compatible_c() {
-                out.new_line();
-                out.write("}  // extern \"C\"");
-                out.new_line();
-            }
+        //     if b.config.language == Language::CSharp || b.config.cpp_compatible_c() {
+        //         out.new_line();
+        //         out.write("}  // extern \"C\"");
+        //         out.new_line();
+        //     }
 
-            if b.config.cpp_compatible_c() {
-                out.write("#endif  // __cplusplus");
-                out.new_line();
-            }
-        }
+        //     if b.config.cpp_compatible_c() {
+        //         out.write("#endif  // __cplusplus");
+        //         out.new_line();
+        //     }
+        // }
     }
 }
