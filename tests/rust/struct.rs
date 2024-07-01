@@ -28,11 +28,23 @@ struct TupleRenamed(i32, f32);
 #[repr(C)]
 struct TupleNamed(i32, f32);
 
+#[repr(C)]
+struct WithBool {
+    x: i32,
+    y: f32,
+    z: bool,
+}
+
+#[repr(C)]
+struct TupleWithBool(i32, f32, bool);
+
 #[no_mangle]
 pub extern "C" fn root(
     a: *mut Opaque,
     b: Normal,
     c: NormalWithZST,
     d: TupleRenamed,
-    e: TupleNamed
+    e: TupleNamed,
+    f: WithBool,
+    g: TupleWithBool,
 ) { }

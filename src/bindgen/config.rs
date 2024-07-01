@@ -23,6 +23,7 @@ pub enum Language {
     Cxx,
     C,
     Cython,
+    CSharp,
 }
 
 impl FromStr for Language {
@@ -42,6 +43,12 @@ impl FromStr for Language {
             "C" => Ok(Language::C),
             "cython" => Ok(Language::Cython),
             "Cython" => Ok(Language::Cython),
+            "csharp" => Ok(Language::CSharp),
+            "Csharp" => Ok(Language::CSharp),
+            "CSharp" => Ok(Language::CSharp),
+            "CSHARP" => Ok(Language::CSharp),
+            "c#" => Ok(Language::CSharp),
+            "C#" => Ok(Language::CSharp),
             _ => Err(format!("Unrecognized Language: '{}'.", s)),
         }
     }
@@ -54,6 +61,7 @@ impl Language {
         match self {
             Language::Cxx | Language::C => "typedef",
             Language::Cython => "ctypedef",
+            Language::CSharp => "using",
         }
     }
 }
@@ -894,6 +902,22 @@ pub struct CythonConfig {
     pub cimports: BTreeMap<String, Vec<String>>,
 }
 
+/// Settings specific to C# bindings.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub struct CSharpConfig {
+    /// Package to use
+    pub package: Option<String>,
+
+    /// Name of the generated interface
+    pub interface_name: Option<String>,
+
+    /// Extra definition to include inside the generated interface
+    pub extra_defs: Option<String>,
+}
+
 /// A collection of settings to customize the generated bindings.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1016,6 +1040,8 @@ pub struct Config {
     /// via the CLI, when ran from a build script cargo sets this variable
     /// appropriately).
     pub only_target_dependencies: bool,
+    /// Configuration options specific to C#.
+    pub csharp: CSharpConfig,
     /// Configuration options specific to Cython.
     pub cython: CythonConfig,
     #[doc(hidden)]
@@ -1069,6 +1095,7 @@ impl Default for Config {
             documentation_length: DocumentationLength::Full,
             pointer: PtrConfig::default(),
             only_target_dependencies: false,
+            csharp: CSharpConfig::default(),
             cython: CythonConfig::default(),
             config_path: None,
         }

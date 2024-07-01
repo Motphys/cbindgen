@@ -25,8 +25,22 @@ typedef struct TupleNamed {
   float y;
 } TupleNamed;
 
+typedef struct WithBool {
+  int32_t x;
+  float y;
+  bool z;
+} WithBool;
+
+typedef struct TupleWithBool {
+  int32_t _0;
+  float _1;
+  bool _2;
+} TupleWithBool;
+
 void root(struct Opaque *a,
           struct Normal b,
           struct NormalWithZST c,
           struct TupleRenamed d,
-          struct TupleNamed e);
+          struct TupleNamed e,
+          struct WithBool f,
+          struct TupleWithBool g);

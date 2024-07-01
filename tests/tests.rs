@@ -2,10 +2,11 @@ extern crate cbindgen;
 
 use cbindgen::*;
 use std::collections::HashSet;
+use std::fmt::format;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, CommandArgs};
 use std::{env, fs, str};
 
 use pretty_assertions::assert_eq;
@@ -58,6 +59,9 @@ fn run_cbindgen(
         }
         Language::Cython => {
             command.arg("--lang").arg("cython");
+        }
+        Language::CSharp => {
+            command.arg("--lang").arg("csharp");
         }
     }
 
@@ -123,15 +127,36 @@ fn compile(
         Language::Cxx => env::var("CXX").unwrap_or_else(|_| "g++".to_owned()),
         Language::C => env::var("CC").unwrap_or_else(|_| "gcc".to_owned()),
         Language::Cython => env::var("CYTHON").unwrap_or_else(|_| "cython".to_owned()),
+        Language::CSharp => {
+            // find out dotnet from environment variable DOTNET_INSTALL_DIR,
+            // if it's set, use `$DOTNET_INSTALL_DIR/dotnet`, otherwise find `dotnet` with which
+            let dotnet = env::var("DOTNET_INSTALL_DIR")
+                .map(|dotnet_install_dir| {
+                    let mut dotnet: std::path::PathBuf = dotnet_install_dir.into();
+                    dotnet.push("dotnet");
+                    dotnet.to_str().unwrap().to_owned()
+                })
+                .unwrap_or_else(|_| {
+                    // we need the full path of dotnet for SDK path later
+                    let result = which::which("dotnet")
+                        .expect("dotnet not found in PATH, please install .NET SDK");
+                    result.to_str().unwrap().to_owned()
+                });
+            dotnet
+        }
     };
 
     let file_name = cbindgen_output
         .file_name()
         .expect("cbindgen output should be a file");
     let mut object = tmp_dir.join(file_name);
-    object.set_extension("o");
+    if language == Language::CSharp {
+        object.set_extension("dll");
+    } else {
+        object.set_extension("o");
+    }
 
-    let mut command = Command::new(cc);
+    let mut command = Command::new(cc.clone());
     match language {
         Language::Cxx | Language::C => {
             command.arg("-D").arg("DEFINED");
@@ -185,6 +210,80 @@ fn compile(
             command.arg("-o").arg(&object);
             command.arg(cbindgen_output);
         }
+        Language::CSharp => {
+            // We need to compile the generated C# code with the .NET SDK.
+            let dotnet: std::path::PathBuf = cc.into();
+            let dotnet_install_dir = dotnet.parent().unwrap();
+            let sdk_path = dotnet_install_dir.join("sdk");
+            let sdk_version = env::var("DOTNET_VERSION").unwrap_or_else(|_| {
+                fs::read_dir(&sdk_path)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().file_name())
+                    .max()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            });
+            let csc = sdk_path.join(sdk_version).join("Roslyn/bincore/csc.dll");
+
+            // find latest from dotnet\packs\Microsoft.NETCore.App.Ref\, like dotnet\packs\Microsoft.NETCore.App.Ref\7.0.5\ref\net7.0
+            let ref_path = dotnet_install_dir.join("packs/Microsoft.NETCore.App.Ref");
+            let ref_version = fs::read_dir(&ref_path)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .max()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let ref_path = ref_path.join(ref_version).join("ref");
+            // find latest  from ref_lib_path
+            let net_version = fs::read_dir(&ref_path)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .max()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let ref_path = ref_path.join(net_version);
+
+            command.arg("exec");
+            command.arg(csc);
+            command.arg("/nostdlib");
+            command.arg("/noconfig");
+            command.arg("-target:library");
+            command.arg(format!("-out:{:?}", object));
+
+            // add all the ref dlls
+            for entry in fs::read_dir(&ref_path).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if path.extension().unwrap() == "dll" {
+                    command.arg(format!("/r:{:?}", path));
+                }
+            }
+            command.arg(cbindgen_output);
+            command.arg("-langversion:9.0");
+            command.arg("/unsafe+");
+            command.arg("/deterministic");
+            command.arg("/optimize-");
+            command.arg("/debug:portable");
+            command.arg("/nologo");
+            command.arg("/RuntimeMetadataVersion:v4.0.30319");
+            command.arg("/nowarn:0169");
+            command.arg("/nowarn:0649");
+            command.arg("/nowarn:0282");
+            command.arg("/nowarn:1701");
+            command.arg("/nowarn:1702");
+            command.arg("/utf8output");
+            command.arg("/preferreduilang:en-US");
+
+            if !skip_warning_as_error {
+                command.arg("/warnaserror");
+            }
+        }
     }
 
     println!("Running: {:?}", command);
@@ -209,7 +308,16 @@ fn run_compile_test(
     cbindgen_outputs: &mut HashSet<Vec<u8>>,
     package_version: bool,
 ) {
-    let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| {
+        // When debugging in VSCode, the CARGO_MANIFEST_DIR is not set, fallback to current directory.
+        // See https://github.com/rust-lang/rust-analyzer/issues/13022
+        std::env::current_dir()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    });
+
     let tests_path = Path::new(&crate_dir).join("tests");
     let mut generated_file = tests_path.join("expectations");
     fs::create_dir_all(&generated_file).unwrap();
@@ -230,6 +338,7 @@ fn run_compile_test(
         // is extension-sensitive and won't work on them, so we use implementation files (`.pyx`)
         // in the test suite.
         Language::Cython => ".pyx",
+        Language::CSharp => ".cs",
     };
 
     let skip_warning_as_error = name.rfind(SKIP_WARNING_AS_ERROR_SUFFIX).is_some();
@@ -258,6 +367,8 @@ fn run_compile_test(
         generate_depfile,
         package_version,
     );
+    // Skip depfile verification on Windows, as the paths are not normalized.
+    #[cfg(not(windows))]
     if generate_depfile {
         let depfile = depfile_contents.expect("No depfile generated");
         assert!(!depfile.is_empty());
@@ -330,15 +441,47 @@ fn test_file(name: &'static str, filename: &'static str) {
     let tmp_dir = tmp_dir.path();
     // Run tests in deduplication priority order. C++ compatibility tests are run first,
     // otherwise we would lose the C++ compiler run if they were deduplicated.
-    let mut cbindgen_outputs = HashSet::new();
-    for cpp_compat in &[true, false] {
-        for style in &[Style::Type, Style::Tag, Style::Both] {
+    if env::var_os("CBINDGEN_TEST_SKIP_C").is_none() {
+        let mut cbindgen_outputs = HashSet::new();
+        for cpp_compat in &[true, false] {
+            for style in &[Style::Type, Style::Tag, Style::Both] {
+                run_compile_test(
+                    name,
+                    test,
+                    tmp_dir,
+                    Language::C,
+                    *cpp_compat,
+                    Some(*style),
+                    &mut cbindgen_outputs,
+                    false,
+                );
+            }
+        }
+    }
+
+    if env::var_os("CBINDGEN_TEST_SKIP_CXX").is_none() {
+        run_compile_test(
+            name,
+            test,
+            tmp_dir,
+            Language::Cxx,
+            /* cpp_compat = */ false,
+            None,
+            &mut HashSet::new(),
+            false,
+        );
+    }
+
+    if env::var_os("CBINDGEN_TEST_SKIP_CYTHON").is_none() {
+        // `Style::Both` should be identical to `Style::Tag` for Cython.
+        let mut cbindgen_outputs = HashSet::new();
+        for style in &[Style::Type, Style::Tag] {
             run_compile_test(
                 name,
                 test,
                 tmp_dir,
-                Language::C,
-                *cpp_compat,
+                Language::Cython,
+                /* cpp_compat = */ false,
                 Some(*style),
                 &mut cbindgen_outputs,
                 false,
@@ -346,28 +489,15 @@ fn test_file(name: &'static str, filename: &'static str) {
         }
     }
 
-    run_compile_test(
-        name,
-        test,
-        tmp_dir,
-        Language::Cxx,
-        /* cpp_compat = */ false,
-        None,
-        &mut HashSet::new(),
-        false,
-    );
-
-    // `Style::Both` should be identical to `Style::Tag` for Cython.
-    let mut cbindgen_outputs = HashSet::new();
-    for style in &[Style::Type, Style::Tag] {
+    if env::var_os("CBINDGEN_TEST_SKIP_CSHARP").is_none() {
         run_compile_test(
             name,
             test,
             tmp_dir,
-            Language::Cython,
+            Language::CSharp,
             /* cpp_compat = */ false,
-            Some(*style),
-            &mut cbindgen_outputs,
+            None,
+            &mut HashSet::new(),
             false,
         );
     }

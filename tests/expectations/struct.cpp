@@ -26,8 +26,26 @@ struct TupleNamed {
   float y;
 };
 
+struct WithBool {
+  int32_t x;
+  float y;
+  bool z;
+};
+
+struct TupleWithBool {
+  int32_t _0;
+  float _1;
+  bool _2;
+};
+
 extern "C" {
 
-void root(Opaque *a, Normal b, NormalWithZST c, TupleRenamed d, TupleNamed e);
+void root(Opaque *a,
+          Normal b,
+          NormalWithZST c,
+          TupleRenamed d,
+          TupleNamed e,
+          WithBool f,
+          TupleWithBool g);
 
 }  // extern "C"

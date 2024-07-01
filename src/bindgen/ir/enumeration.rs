@@ -14,7 +14,7 @@ use crate::bindgen::ir::{
     GenericArgument, GenericParams, GenericPath, Item, ItemContainer, Literal, Path, Repr,
     ReprStyle, Struct, ToCondition, Type,
 };
-use crate::bindgen::language_backend::LanguageBackend;
+use crate::bindgen::language_backend::{self, LanguageBackend};
 use crate::bindgen::library::Library;
 use crate::bindgen::mangle;
 use crate::bindgen::monomorph::Monomorphs;
@@ -198,7 +198,12 @@ impl EnumVariant {
                 // Besides that for C++ we generate casts/getters that can be used instead of
                 // direct field accesses and also have a benefit of being checked.
                 // As a result we don't currently inline variant definitions in C++ mode at all.
-                let inline = inline_casts && config.language != Language::Cxx;
+                //
+                // In C# we also don't inline variant definitions because C# doesn't support unnamed
+                // structs and we don't want to generate extra noise.
+                let inline = inline_casts
+                    && config.language != Language::Cxx
+                    && config.language != Language::CSharp;
                 let inline_name = if inline { Some(&*name) } else { None };
                 VariantBody::Body {
                     body: Struct::new(
@@ -503,7 +508,10 @@ impl Item for Enum {
     fn rename_for_config(&mut self, config: &Config) {
         config.export.rename(&mut self.export_name);
 
-        if config.language != Language::Cxx && self.tag.is_some() {
+        if config.language != Language::Cxx
+            && config.language != Language::CSharp
+            && self.tag.is_some()
+        {
             // it makes sense to always prefix Tag with type name in C
             let new_tag = format!("{}_Tag", self.export_name);
             if self.repr.style == ReprStyle::Rust {
@@ -729,6 +737,27 @@ impl Enum {
                     write!(out, "{}enum {}", config.style.cython_def(), tag_name);
                 }
             }
+            Language::CSharp => {
+                out.write("public enum");
+
+                if self.annotations.must_use(config) {
+                    if let Some(ref anno) = config.enumeration.must_use {
+                        write!(out, " {}", anno)
+                    }
+                }
+
+                if let Some(note) = self
+                    .annotations
+                    .deprecated_note(config, DeprecatedNoteKind::Enum)
+                {
+                    write!(out, " {}", note);
+                }
+
+                write!(out, " {}", tag_name);
+                if let Some(prim) = size {
+                    write!(out, " : {}", prim);
+                }
+            }
         }
         out.open_brace();
 
@@ -745,7 +774,7 @@ impl Enum {
             out.close_brace(false);
             write!(out, " {};", tag_name);
         } else {
-            out.close_brace(true);
+            out.close_brace(config.language != Language::CSharp);
         }
 
         // Emit typedef specifying the tag enum's size if necessary.
@@ -757,7 +786,7 @@ impl Enum {
                 out.write("#ifndef __cplusplus");
             }
 
-            if config.language != Language::Cxx {
+            if config.language != Language::Cxx && config.language != Language::CSharp {
                 out.new_line();
                 write!(out, "{} {} {};", config.language.typedef(), prim, tag_name);
             }
@@ -783,6 +812,7 @@ impl Enum {
             Language::C if config.style.generate_typedef() => out.write("typedef "),
             Language::C | Language::Cxx => {}
             Language::Cython => out.write(config.style.cython_def()),
+            Language::CSharp => unreachable!("C# doesn't use this method"),
         }
 
         out.write(if inline_tag_field { "union" } else { "struct" });
@@ -867,6 +897,15 @@ impl Enum {
             out.write("enum ");
         }
 
+        if config.language == Language::CSharp && inline_tag_field {
+            out.write("[FieldOffset(0)]");
+            out.new_line();
+        }
+
+        if config.language == Language::CSharp {
+            out.write("public ");
+        }
+
         write!(out, "{} tag;", tag_name);
 
         if wrap_tag {
@@ -925,6 +964,10 @@ impl Enum {
                     if config.language != Language::Cython {
                         out.close_brace(true);
                     }
+                } else if config.language == Language::CSharp {
+                    out.write("[FieldOffset(0)]");
+                    out.new_line();
+                    write!(out, "public {} {};", body.export_name(), name);
                 } else if config.style.generate_typedef() || config.language == Language::Cython {
                     write!(out, "{} {};", body.export_name(), name);
                 } else {
