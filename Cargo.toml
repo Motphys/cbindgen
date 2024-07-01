@@ -38,6 +38,7 @@ features = ["clone-impls", "extra-traits", "fold", "full", "parsing", "printing"
 [dev-dependencies]
 serial_test = { version = "2.0.0", default-features = false }
 pretty_assertions = "1.4.0"
+which = "4"
 
 [features]
 default =  ["clap"]

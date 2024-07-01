@@ -61,9 +61,15 @@ jobs:
         pip install Cython==3.0.2
 
     - name: Install dotnet
+      id: dotnet
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '7.0.302' # dotnet 7.0.302 is used by Unity 2021.3.39f1, 2022.3.33f1, 2023.2.20f1 and 6000.0.5f1
+    
+    - name: Get dotnet version
+      run: |
+        DOTNET_VERSION=${{ steps.dotnet.outputs.dotnet-version }}
+        echo "DOTNET_VERSION=${DOTNET_VERSION}" >> $GITHUB_ENV
 
     - name: Build
       run: |

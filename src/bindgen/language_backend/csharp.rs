@@ -1,7 +1,7 @@
 use crate::bindgen::ir::{
     to_known_assoc_constant, ConditionWrite, DeprecatedNoteKind, Documentation, Enum, EnumVariant,
-    Field, GenericParams, Item, Literal, OpaqueItem, Static, Struct, ToCondition, Type,
-    Typedef, Union,
+    Field, GenericParams, Item, Literal, OpaqueItem, Static, Struct, ToCondition, Type, Typedef,
+    Union,
 };
 use crate::bindgen::language_backend::LanguageBackend;
 use crate::bindgen::rename::IdentifierType;
@@ -53,7 +53,7 @@ impl<'a> CSharpLanguageBackend<'a> {
         condition.write_before(self.config, out);
 
         self.write_documentation(out, &f.documentation);
-        
+
         // check if the type is bool
         let is_bool = match &f.ty {
             Type::Primitive(primitive) => primitive.to_repr_csharp(self.config) == "bool",
